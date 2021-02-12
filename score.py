@@ -1,3 +1,6 @@
+from argparse import ArgumentParser
+import sys
+
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist, euclidean
@@ -6,6 +9,34 @@ from scipy.spatial.distance import cdist, euclidean
 KGP_SAMPLES_PATH = 'kgp_samples.csv'
 POPULATION_DISTANCES_PATH = 'population_distances.csv'
 
+
+parser = ArgumentParser(description='Calculate Genome Ranking Score')
+parser.add_argument('-e', '--embeddings', type=str, required=True,
+                    help='path to npy file containing sample embeddings')
+parser.add_argument('-s', '--samples', type=str, required=True,
+                    help='path to npy file containing sample names in same order as embedding file')
+parser.add_argument('-m', '--metric', type=str, default='euclidean',
+                    help='name of distance metric to be used when computing distance (supports scipy cdist metrics and hellinger)')
+
+
+def main():
+    args = parser.parse_args()
+
+    kgp_sample_df = pd.read_csv(KGP_SAMPLES_PATH)
+    population_distance_df = pd.read_csv(POPULATION_DISTANCES_PATH, index_col=1)
+
+    samples = np.load(args.samples, allow_pickle=True)
+    kgp_sample_df = kgp_sample_df[kgp_sample_df.apply(lambda x: x['Sample'] in samples, axis=1)]
+    embeddings = np.load(args.embeddings)
+
+    try:
+        metric = getattr(sys.modules[__name__], args.metric)
+    except AttributeError:
+        metric = args.metric
+
+    distance_matrix = cdist(embeddings, embeddings, metric=metric)
+    ranking_matrix = distance_matrix.argsort().argsort()
+    print(ranking_score(ranking_matrix, kgp_sample_df, population_distance_df, samples))
 
 # define the hellinger distance between two probability distributions
 def hellinger(a: np.ndarray, b: np.ndarray) -> float:
@@ -24,8 +55,6 @@ def random_misranked_position(n, floor, ceiling):
 
 def individual_ranking_score(rankings, population_group_assignments, population_groups, average_random_misranked_positions):
     average_misranked_positions = np.mean([misranked_position(rankings[i], population_groups[population_group_assignments[i]]['floor'], population_groups[population_group_assignments[i]]['ceiling']) for i in range(len(rankings))])
-    # print(average_misranked_positions)
-    # print(average_random_misranked_positions)
     return average_random_misranked_positions / average_misranked_positions
 
 def ranking_score_by_population(ranking_matrix, kgp_sample_df, population_distance_df, samples, population):
@@ -54,33 +83,5 @@ def ranking_score(ranking_matrix, kgp_sample_df, population_distance_df, samples
     return np.mean(individual_ranking_scores)
 
 
-kgp_sample_df = pd.read_csv(KGP_SAMPLES_PATH)
-population_distance_df = pd.read_csv(POPULATION_DISTANCES_PATH, index_col=1)
-
-samples_path = 'samples.npy'
-samples = np.load(samples_path, allow_pickle=True)
-kgp_sample_df = kgp_sample_df[kgp_sample_df.apply(lambda x: x['Sample'] in samples, axis=1)]
-
-embeddings_path = 'principle_components.npy'
-embeddings = np.load(embeddings_path)
-metric = 'euclidean'
-
-distance_matrix = cdist(embeddings, embeddings, metric=metric)
-ranking_matrix = np.argsort(distance_matrix)
-print(ranking_score(ranking_matrix, kgp_sample_df, population_distance_df, samples))
-
-embeddings_path = 'lda_embedded_genomes.npy'
-embeddings = np.load(embeddings_path)
-metric = hellinger
-
-distance_matrix = cdist(embeddings, embeddings, metric=metric)
-ranking_matrix = np.argsort(distance_matrix)
-print(ranking_score(ranking_matrix, kgp_sample_df, population_distance_df, samples))
-
-#
-# Sanity check that the random misranked formula is correct
-# SEED = 1
-# np.random.seed(SEED)
-# ranking_matrix = np.stack([np.random.permutation(ranking_matrix.shape[1]) for i in range(ranking_matrix.shape[0])])
-# print(ranking_score(ranking_matrix, kgp_sample_df, population_distance_df, samples))
-#
+if __name__ == '__main__':
+    main()
